@@ -1,0 +1,1167 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "MP-Buyer Serverless Web - API Gateway + Lambda + S3/CloudFront",
+
+  "Parameters": {
+    "AdminUsername": {
+      "Type": "String",
+      "Description": "Username for the first Cognito user",
+      "MinLength": 3,
+      "MaxLength": 64
+    },
+    "AdminEmail": {
+      "Type": "String",
+      "Description": "Email address for the first Cognito user",
+      "AllowedPattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+    }
+  },
+
+  "Resources": {
+
+    "UserPool": {
+      "Type": "AWS::Cognito::UserPool",
+      "Properties": {
+        "UserPoolName": { "Fn::Sub": "mp-buyer-pool-${AWS::StackName}" },
+        "AutoVerifiedAttributes": ["email"],
+        "UsernameAttributes": ["email"],
+        "Policies": {
+          "PasswordPolicy": {
+            "MinimumLength": 8,
+            "RequireUppercase": true,
+            "RequireLowercase": true,
+            "RequireNumbers": true,
+            "RequireSymbols": false
+          }
+        },
+        "Schema": [
+          {
+            "Name": "email",
+            "Required": true,
+            "Mutable": true,
+            "AttributeDataType": "String"
+          }
+        ]
+      }
+    },
+
+    "UserPoolClient": {
+      "Type": "AWS::Cognito::UserPoolClient",
+      "Properties": {
+        "ClientName": { "Fn::Sub": "mp-buyer-client-${AWS::StackName}" },
+        "UserPoolId": { "Ref": "UserPool" },
+        "GenerateSecret": false,
+        "ExplicitAuthFlows": [
+          "ALLOW_USER_PASSWORD_AUTH",
+          "ALLOW_USER_SRP_AUTH",
+          "ALLOW_REFRESH_TOKEN_AUTH"
+        ],
+        "SupportedIdentityProviders": ["COGNITO"],
+        "PreventUserExistenceErrors": "ENABLED"
+      }
+    },
+
+    "AdminUser": {
+      "Type": "AWS::Cognito::UserPoolUser",
+      "Properties": {
+        "UserPoolId": { "Ref": "UserPool" },
+        "Username": { "Ref": "AdminEmail" },
+        "UserAttributes": [
+          {
+            "Name": "email",
+            "Value": { "Ref": "AdminEmail" }
+          },
+          {
+            "Name": "email_verified",
+            "Value": "true"
+          }
+        ],
+        "DesiredDeliveryMediums": ["EMAIL"]
+      }
+    },
+
+    "ApiGatewayAuthorizer": {
+      "Type": "AWS::ApiGateway::Authorizer",
+      "Properties": {
+        "Name": "CognitoAuthorizer",
+        "Type": "COGNITO_USER_POOLS",
+        "RestApiId": { "Ref": "ApiGateway" },
+        "IdentitySource": "method.request.header.Authorization",
+        "ProviderARNs": [
+          { "Fn::GetAtt": ["UserPool", "Arn"] }
+        ]
+      }
+    },
+
+    "LambdaExecutionRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": { "Fn::Sub": "mp-buyer-lambda-${AWS::StackName}" },
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": { "Service": "lambda.amazonaws.com" },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        ],
+        "Policies": [
+          {
+            "PolicyName": "MarketplaceAgreementAccess",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "aws-marketplace:SearchAgreements",
+                    "aws-marketplace:DescribeAgreement",
+                    "aws-marketplace:GetAgreementTerms",
+                    "aws-marketplace:CreateAgreementRequest",
+                    "aws-marketplace:AcceptAgreementRequest",
+                    "aws-marketplace:GetProduct",
+                    "aws-marketplace:SearchListings",
+                    "aws-marketplace:ListPurchaseOptions",
+                    "aws-marketplace:GetListing",
+                    "aws-marketplace:GetOffer",
+                    "aws-marketplace:GetOfferTerms",
+                    "aws-marketplace:SearchFacets"
+                  ],
+                  "Resource": "*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "bedrock:InvokeModel",
+                    "bedrock:InvokeModelWithResponseStream"
+                  ],
+                  "Resource": "arn:aws:bedrock:*::foundation-model/*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:PutObject",
+                    "s3:GetObject"
+                  ],
+                  "Resource": { "Fn::Sub": "arn:aws:s3:::${WebsiteBucket}/reports/*" }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "dynamodb:PutItem",
+                    "dynamodb:GetItem",
+                    "dynamodb:Query",
+                    "dynamodb:Scan",
+                    "dynamodb:UpdateItem",
+                    "dynamodb:BatchWriteItem"
+                  ],
+                  "Resource": [
+                    { "Fn::GetAtt": ["AgreementsTable", "Arn"] },
+                    { "Fn::Sub": "${AgreementsTable.Arn}/index/*" }
+                  ]
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "kms:Decrypt",
+                    "kms:DescribeKey",
+                    "kms:Encrypt",
+                    "kms:GenerateDataKey*"
+                  ],
+                  "Resource": "*"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+
+    "AgreementsFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": { "Fn::Sub": "mp-buyer-api-${AWS::StackName}" },
+        "Runtime": "python3.11",
+        "Handler": "handler.lambda_handler",
+        "Role": { "Fn::GetAtt": ["LambdaExecutionRole", "Arn"] },
+        "Timeout": 30,
+        "MemorySize": 256,
+        "Environment": {
+          "Variables": {
+            "AWS_REGION_NAME": { "Ref": "AWS::Region" }
+          }
+        },
+        "Code": {
+          "ZipFile": { "Fn::Join": ["\n", [
+            "# Placeholder - deploy actual code via update",
+            "def lambda_handler(event, context):",
+            "    return {'statusCode': 200, 'body': 'Deploy lambda code'}"
+          ]]}
+        }
+      }
+    },
+
+    "ReportsFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": { "Fn::Sub": "mp-buyer-reports-${AWS::StackName}" },
+        "Runtime": "python3.11",
+        "Handler": "handler.lambda_handler",
+        "Role": { "Fn::GetAtt": ["LambdaExecutionRole", "Arn"] },
+        "Timeout": 120,
+        "MemorySize": 512,
+        "Environment": {
+          "Variables": {
+            "AWS_REGION_NAME": { "Ref": "AWS::Region" },
+            "REPORT_BUCKET": { "Ref": "WebsiteBucket" },
+            "TABLE_NAME": { "Ref": "AgreementsTable" },
+            "USE_STRANDS": "true"
+          }
+        },
+        "Code": {
+          "ZipFile": { "Fn::Join": ["\n", [
+            "# Placeholder - deploy actual code via update",
+            "def lambda_handler(event, context):",
+            "    return {'statusCode': 200, 'body': 'Deploy reports code'}"
+          ]]}
+        }
+      }
+    },
+
+    "ReportsLambdaPermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "FunctionName": { "Ref": "ReportsFunction" },
+        "Action": "lambda:InvokeFunction",
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": { "Fn::Sub": "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*" }
+      }
+    },
+
+    "DynamoDBKmsKey": {
+      "Type": "AWS::KMS::Key",
+      "Properties": {
+        "Description": "CMK for MP-Buyer DynamoDB table encryption",
+        "EnableKeyRotation": true,
+        "KeyPolicy": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "EnableRootAccountAccess",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": { "Fn::Sub": "arn:aws:iam::${AWS::AccountId}:root" }
+              },
+              "Action": "kms:*",
+              "Resource": "*"
+            }
+          ]
+        }
+      }
+    },
+
+    "AgreementsTable": {
+      "Type": "AWS::DynamoDB::Table",
+      "Properties": {
+        "TableName": { "Fn::Sub": "mp-buyer-agreements-${AWS::StackName}" },
+        "BillingMode": "PAY_PER_REQUEST",
+        "PointInTimeRecoverySpecification": {
+          "PointInTimeRecoveryEnabled": true
+        },
+        "SSESpecification": {
+          "SSEEnabled": true,
+          "SSEType": "KMS",
+          "KMSMasterKeyId": { "Ref": "DynamoDBKmsKey" }
+        },
+        "AttributeDefinitions": [
+          { "AttributeName": "PK", "AttributeType": "S" },
+          { "AttributeName": "SK", "AttributeType": "S" },
+          { "AttributeName": "status", "AttributeType": "S" },
+          { "AttributeName": "endTime", "AttributeType": "S" }
+        ],
+        "KeySchema": [
+          { "AttributeName": "PK", "KeyType": "HASH" },
+          { "AttributeName": "SK", "KeyType": "RANGE" }
+        ],
+        "GlobalSecondaryIndexes": [
+          {
+            "IndexName": "status-index",
+            "KeySchema": [
+              { "AttributeName": "status", "KeyType": "HASH" },
+              { "AttributeName": "PK", "KeyType": "RANGE" }
+            ],
+            "Projection": { "ProjectionType": "ALL" }
+          },
+          {
+            "IndexName": "endTime-index",
+            "KeySchema": [
+              { "AttributeName": "SK", "KeyType": "HASH" },
+              { "AttributeName": "endTime", "KeyType": "RANGE" }
+            ],
+            "Projection": { "ProjectionType": "ALL" }
+          }
+        ]
+      }
+    },
+
+    "SyncFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": { "Fn::Sub": "mp-buyer-sync-${AWS::StackName}" },
+        "Runtime": "python3.11",
+        "Handler": "handler.lambda_handler",
+        "Role": { "Fn::GetAtt": ["LambdaExecutionRole", "Arn"] },
+        "Timeout": 300,
+        "MemorySize": 512,
+        "Environment": {
+          "Variables": {
+            "AWS_REGION_NAME": { "Ref": "AWS::Region" },
+            "TABLE_NAME": { "Ref": "AgreementsTable" }
+          }
+        },
+        "Code": {
+          "ZipFile": { "Fn::Join": ["\n", [
+            "def lambda_handler(event, context):",
+            "    return {'status': 'deploy sync code'}"
+          ]]}
+        }
+      }
+    },
+
+    "SyncScheduleRule": {
+      "Type": "AWS::Events::Rule",
+      "Properties": {
+        "Name": { "Fn::Sub": "mp-buyer-sync-schedule-${AWS::StackName}" },
+        "Description": "Sync Marketplace agreements to DynamoDB every 6 hours",
+        "ScheduleExpression": "rate(6 hours)",
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Id": "SyncTarget",
+            "Arn": { "Fn::GetAtt": ["SyncFunction", "Arn"] }
+          }
+        ]
+      }
+    },
+
+    "SyncSchedulePermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "FunctionName": { "Ref": "SyncFunction" },
+        "Action": "lambda:InvokeFunction",
+        "Principal": "events.amazonaws.com",
+        "SourceArn": { "Fn::GetAtt": ["SyncScheduleRule", "Arn"] }
+      }
+    },
+
+    "ReportsScheduleRule": {
+      "Type": "AWS::Events::Rule",
+      "Properties": {
+        "Name": { "Fn::Sub": "mp-buyer-reports-schedule-${AWS::StackName}" },
+        "Description": "Generate all reports 3 times a day (30 min after sync)",
+        "ScheduleExpression": "cron(30 2,10,18 * * ? *)",
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Id": "ReportsTarget",
+            "Arn": { "Fn::GetAtt": ["ReportsFunction", "Arn"] },
+            "Input": "{\"body\": \"{\\\"report_type\\\": \\\"all\\\", \\\"scheduled\\\": true}\"}"
+          }
+        ]
+      }
+    },
+
+    "ReportsSchedulePermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "FunctionName": { "Ref": "ReportsFunction" },
+        "Action": "lambda:InvokeFunction",
+        "Principal": "events.amazonaws.com",
+        "SourceArn": { "Fn::GetAtt": ["ReportsScheduleRule", "Arn"] }
+      }
+    },
+
+    "ApiGateway": {
+      "Type": "AWS::ApiGateway::RestApi",
+      "Properties": {
+        "Name": { "Fn::Sub": "mp-buyer-api-${AWS::StackName}" },
+        "Description": "MP-Buyer Marketplace Agreements API",
+        "EndpointConfiguration": {
+          "Types": ["REGIONAL"]
+        }
+      }
+    },
+
+    "ApiGatewayResourceApi": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ParentId": { "Fn::GetAtt": ["ApiGateway", "RootResourceId"] },
+        "PathPart": "api"
+      }
+    },
+
+    "ApiGatewayResourceHealth": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ParentId": { "Ref": "ApiGatewayResourceApi" },
+        "PathPart": "health"
+      }
+    },
+
+    "ApiGatewayResourceAgreements": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ParentId": { "Ref": "ApiGatewayResourceApi" },
+        "PathPart": "agreements"
+      }
+    },
+
+    "ApiGatewayResourceSearch": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ParentId": { "Ref": "ApiGatewayResourceAgreements" },
+        "PathPart": "search"
+      }
+    },
+
+    "ApiGatewayResourceAgreementId": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ParentId": { "Ref": "ApiGatewayResourceAgreements" },
+        "PathPart": "{agreementId}"
+      }
+    },
+
+    "ApiGatewayResourceTerms": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ParentId": { "Ref": "ApiGatewayResourceAgreementId" },
+        "PathPart": "terms"
+      }
+    },
+
+    "ApiGatewayResourceProducts": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ParentId": { "Ref": "ApiGatewayResourceApi" },
+        "PathPart": "products"
+      }
+    },
+
+    "ApiGatewayResourceProductsSearch": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ParentId": { "Ref": "ApiGatewayResourceProducts" },
+        "PathPart": "search"
+      }
+    },
+
+    "ApiGatewayResourceProductId": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ParentId": { "Ref": "ApiGatewayResourceProducts" },
+        "PathPart": "{productId}"
+      }
+    },
+
+    "ApiGatewayResourceProductOptions": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ParentId": { "Ref": "ApiGatewayResourceProductId" },
+        "PathPart": "options"
+      }
+    },
+
+    "ApiGatewayResourceSubscribe": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ParentId": { "Ref": "ApiGatewayResourceApi" },
+        "PathPart": "subscribe"
+      }
+    },
+
+    "ApiGatewayResourceSubscribeAccept": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ParentId": { "Ref": "ApiGatewayResourceSubscribe" },
+        "PathPart": "accept"
+      }
+    },
+
+    "MethodProductsSearchPost": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ResourceId": { "Ref": "ApiGatewayResourceProductsSearch" },
+        "HttpMethod": "POST",
+        "AuthorizationType": "COGNITO_USER_POOLS",
+        "AuthorizerId": { "Ref": "ApiGatewayAuthorizer" },
+        "Integration": {
+          "Type": "AWS_PROXY",
+          "IntegrationHttpMethod": "POST",
+          "Uri": { "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AgreementsFunction.Arn}/invocations" }
+        }
+      }
+    },
+
+    "MethodProductsSearchOptions": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ResourceId": { "Ref": "ApiGatewayResourceProductsSearch" },
+        "HttpMethod": "OPTIONS",
+        "AuthorizationType": "NONE",
+        "Integration": {
+          "Type": "AWS_PROXY",
+          "IntegrationHttpMethod": "POST",
+          "Uri": { "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AgreementsFunction.Arn}/invocations" }
+        }
+      }
+    },
+
+    "MethodProductOptionsGet": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ResourceId": { "Ref": "ApiGatewayResourceProductOptions" },
+        "HttpMethod": "GET",
+        "AuthorizationType": "COGNITO_USER_POOLS",
+        "AuthorizerId": { "Ref": "ApiGatewayAuthorizer" },
+        "Integration": {
+          "Type": "AWS_PROXY",
+          "IntegrationHttpMethod": "POST",
+          "Uri": { "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AgreementsFunction.Arn}/invocations" }
+        }
+      }
+    },
+
+    "MethodProductOptionsOptions": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ResourceId": { "Ref": "ApiGatewayResourceProductOptions" },
+        "HttpMethod": "OPTIONS",
+        "AuthorizationType": "NONE",
+        "Integration": {
+          "Type": "AWS_PROXY",
+          "IntegrationHttpMethod": "POST",
+          "Uri": { "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AgreementsFunction.Arn}/invocations" }
+        }
+      }
+    },
+
+    "MethodSubscribePost": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ResourceId": { "Ref": "ApiGatewayResourceSubscribe" },
+        "HttpMethod": "POST",
+        "AuthorizationType": "COGNITO_USER_POOLS",
+        "AuthorizerId": { "Ref": "ApiGatewayAuthorizer" },
+        "Integration": {
+          "Type": "AWS_PROXY",
+          "IntegrationHttpMethod": "POST",
+          "Uri": { "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AgreementsFunction.Arn}/invocations" }
+        }
+      }
+    },
+
+    "MethodSubscribeOptions": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ResourceId": { "Ref": "ApiGatewayResourceSubscribe" },
+        "HttpMethod": "OPTIONS",
+        "AuthorizationType": "NONE",
+        "Integration": {
+          "Type": "AWS_PROXY",
+          "IntegrationHttpMethod": "POST",
+          "Uri": { "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AgreementsFunction.Arn}/invocations" }
+        }
+      }
+    },
+
+    "MethodSubscribeAcceptPost": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ResourceId": { "Ref": "ApiGatewayResourceSubscribeAccept" },
+        "HttpMethod": "POST",
+        "AuthorizationType": "COGNITO_USER_POOLS",
+        "AuthorizerId": { "Ref": "ApiGatewayAuthorizer" },
+        "Integration": {
+          "Type": "AWS_PROXY",
+          "IntegrationHttpMethod": "POST",
+          "Uri": { "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AgreementsFunction.Arn}/invocations" }
+        }
+      }
+    },
+
+    "MethodSubscribeAcceptOptions": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ResourceId": { "Ref": "ApiGatewayResourceSubscribeAccept" },
+        "HttpMethod": "OPTIONS",
+        "AuthorizationType": "NONE",
+        "Integration": {
+          "Type": "AWS_PROXY",
+          "IntegrationHttpMethod": "POST",
+          "Uri": { "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AgreementsFunction.Arn}/invocations" }
+        }
+      }
+    },
+
+    "ApiGatewayResourceReports": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ParentId": { "Ref": "ApiGatewayResourceApi" },
+        "PathPart": "reports"
+      }
+    },
+
+    "MethodReportsPost": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ResourceId": { "Ref": "ApiGatewayResourceReports" },
+        "HttpMethod": "POST",
+        "AuthorizationType": "COGNITO_USER_POOLS",
+        "AuthorizerId": { "Ref": "ApiGatewayAuthorizer" },
+        "Integration": {
+          "Type": "AWS_PROXY",
+          "IntegrationHttpMethod": "POST",
+          "Uri": { "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ReportsFunction.Arn}/invocations" }
+        }
+      }
+    },
+
+    "MethodReportsGet": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ResourceId": { "Ref": "ApiGatewayResourceReports" },
+        "HttpMethod": "GET",
+        "AuthorizationType": "COGNITO_USER_POOLS",
+        "AuthorizerId": { "Ref": "ApiGatewayAuthorizer" },
+        "Integration": {
+          "Type": "AWS_PROXY",
+          "IntegrationHttpMethod": "POST",
+          "Uri": { "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ReportsFunction.Arn}/invocations" }
+        }
+      }
+    },
+
+    "MethodReportsOptions": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ResourceId": { "Ref": "ApiGatewayResourceReports" },
+        "HttpMethod": "OPTIONS",
+        "AuthorizationType": "NONE",
+        "Integration": {
+          "Type": "AWS_PROXY",
+          "IntegrationHttpMethod": "POST",
+          "Uri": { "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ReportsFunction.Arn}/invocations" }
+        }
+      }
+    },
+
+    "MethodHealthGet": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ResourceId": { "Ref": "ApiGatewayResourceHealth" },
+        "HttpMethod": "GET",
+        "AuthorizationType": "COGNITO_USER_POOLS",
+        "AuthorizerId": { "Ref": "ApiGatewayAuthorizer" },
+        "Integration": {
+          "Type": "AWS_PROXY",
+          "IntegrationHttpMethod": "POST",
+          "Uri": { "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AgreementsFunction.Arn}/invocations" }
+        }
+      }
+    },
+
+    "MethodHealthOptions": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ResourceId": { "Ref": "ApiGatewayResourceHealth" },
+        "HttpMethod": "OPTIONS",
+        "AuthorizationType": "NONE",
+        "Integration": {
+          "Type": "AWS_PROXY",
+          "IntegrationHttpMethod": "POST",
+          "Uri": { "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AgreementsFunction.Arn}/invocations" }
+        }
+      }
+    },
+
+    "MethodSearchPost": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ResourceId": { "Ref": "ApiGatewayResourceSearch" },
+        "HttpMethod": "POST",
+        "AuthorizationType": "COGNITO_USER_POOLS",
+        "AuthorizerId": { "Ref": "ApiGatewayAuthorizer" },
+        "Integration": {
+          "Type": "AWS_PROXY",
+          "IntegrationHttpMethod": "POST",
+          "Uri": { "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AgreementsFunction.Arn}/invocations" }
+        }
+      }
+    },
+
+    "MethodSearchOptions": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ResourceId": { "Ref": "ApiGatewayResourceSearch" },
+        "HttpMethod": "OPTIONS",
+        "AuthorizationType": "NONE",
+        "Integration": {
+          "Type": "AWS_PROXY",
+          "IntegrationHttpMethod": "POST",
+          "Uri": { "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AgreementsFunction.Arn}/invocations" }
+        }
+      }
+    },
+
+    "MethodAgreementGet": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ResourceId": { "Ref": "ApiGatewayResourceAgreementId" },
+        "HttpMethod": "GET",
+        "AuthorizationType": "COGNITO_USER_POOLS",
+        "AuthorizerId": { "Ref": "ApiGatewayAuthorizer" },
+        "Integration": {
+          "Type": "AWS_PROXY",
+          "IntegrationHttpMethod": "POST",
+          "Uri": { "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AgreementsFunction.Arn}/invocations" }
+        }
+      }
+    },
+
+    "MethodAgreementOptions": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ResourceId": { "Ref": "ApiGatewayResourceAgreementId" },
+        "HttpMethod": "OPTIONS",
+        "AuthorizationType": "NONE",
+        "Integration": {
+          "Type": "AWS_PROXY",
+          "IntegrationHttpMethod": "POST",
+          "Uri": { "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AgreementsFunction.Arn}/invocations" }
+        }
+      }
+    },
+
+    "MethodTermsGet": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ResourceId": { "Ref": "ApiGatewayResourceTerms" },
+        "HttpMethod": "GET",
+        "AuthorizationType": "COGNITO_USER_POOLS",
+        "AuthorizerId": { "Ref": "ApiGatewayAuthorizer" },
+        "Integration": {
+          "Type": "AWS_PROXY",
+          "IntegrationHttpMethod": "POST",
+          "Uri": { "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AgreementsFunction.Arn}/invocations" }
+        }
+      }
+    },
+
+    "MethodTermsOptions": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "ResourceId": { "Ref": "ApiGatewayResourceTerms" },
+        "HttpMethod": "OPTIONS",
+        "AuthorizationType": "NONE",
+        "Integration": {
+          "Type": "AWS_PROXY",
+          "IntegrationHttpMethod": "POST",
+          "Uri": { "Fn::Sub": "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AgreementsFunction.Arn}/invocations" }
+        }
+      }
+    },
+
+    "ApiDeployment": {
+      "Type": "AWS::ApiGateway::Deployment",
+      "DependsOn": [
+        "MethodHealthGet",
+        "MethodHealthOptions",
+        "MethodSearchPost",
+        "MethodSearchOptions",
+        "MethodAgreementGet",
+        "MethodAgreementOptions",
+        "MethodTermsGet",
+        "MethodTermsOptions",
+        "MethodProductsSearchPost",
+        "MethodProductsSearchOptions",
+        "MethodProductOptionsGet",
+        "MethodProductOptionsOptions",
+        "MethodSubscribePost",
+        "MethodSubscribeOptions",
+        "MethodSubscribeAcceptPost",
+        "MethodSubscribeAcceptOptions",
+        "MethodReportsPost",
+        "MethodReportsGet",
+        "MethodReportsOptions"
+      ],
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" }
+      }
+    },
+
+    "ApiStage": {
+      "Type": "AWS::ApiGateway::Stage",
+      "Properties": {
+        "RestApiId": { "Ref": "ApiGateway" },
+        "DeploymentId": { "Ref": "ApiDeployment" },
+        "StageName": "prod",
+        "TracingEnabled": true,
+        "AccessLogSetting": {
+          "DestinationArn": { "Fn::GetAtt": ["ApiAccessLogGroup", "Arn"] },
+          "Format": "{\"requestId\":\"$context.requestId\",\"ip\":\"$context.identity.sourceIp\",\"caller\":\"$context.identity.caller\",\"user\":\"$context.identity.user\",\"requestTime\":\"$context.requestTime\",\"httpMethod\":\"$context.httpMethod\",\"resourcePath\":\"$context.resourcePath\",\"status\":\"$context.status\",\"protocol\":\"$context.protocol\",\"responseLength\":\"$context.responseLength\"}"
+        }
+      }
+    },
+
+    "ApiAccessLogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": { "Fn::Sub": "/aws/apigateway/mp-buyer-${AWS::StackName}" },
+        "RetentionInDays": 90
+      }
+    },
+
+    "LambdaApiGatewayPermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "FunctionName": { "Ref": "AgreementsFunction" },
+        "Action": "lambda:InvokeFunction",
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": { "Fn::Sub": "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*" }
+      }
+    },
+
+    "WebsiteBucket": {
+      "Type": "AWS::S3::Bucket",
+      "Properties": {
+        "BucketName": { "Fn::Sub": "mp-buyer-web-${AWS::AccountId}-${AWS::StackName}" },
+        "VersioningConfiguration": {
+          "Status": "Enabled"
+        },
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }
+          ]
+        },
+        "LoggingConfiguration": {
+          "DestinationBucketName": { "Ref": "LoggingBucket" },
+          "LogFilePrefix": "s3-access-logs/"
+        },
+        "WebsiteConfiguration": {
+          "IndexDocument": "index.html",
+          "ErrorDocument": "index.html"
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        }
+      }
+    },
+
+    "LoggingBucket": {
+      "Type": "AWS::S3::Bucket",
+      "Properties": {
+        "BucketName": { "Fn::Sub": "mp-buyer-logs-${AWS::AccountId}-${AWS::StackName}" },
+        "VersioningConfiguration": {
+          "Status": "Enabled"
+        },
+        "LoggingConfiguration": {
+          "LogFilePrefix": "self-access-logs/"
+        },
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }
+          ]
+        },
+        "AccessControl": "LogDeliveryWrite",
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        },
+        "OwnershipControls": {
+          "Rules": [
+            { "ObjectOwnership": "BucketOwnerPreferred" }
+          ]
+        }
+      }
+    },
+
+    "LoggingBucketPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": { "Ref": "LoggingBucket" },
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "DenyInsecureTransport",
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                { "Fn::GetAtt": ["LoggingBucket", "Arn"] },
+                { "Fn::Sub": "${LoggingBucket.Arn}/*" }
+              ],
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": false
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+
+    "WebsiteBucketPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": { "Ref": "WebsiteBucket" },
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "AllowCloudFrontAccess",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "cloudfront.amazonaws.com"
+              },
+              "Action": "s3:GetObject",
+              "Resource": { "Fn::Sub": "arn:aws:s3:::${WebsiteBucket}/*" },
+              "Condition": {
+                "StringEquals": {
+                  "AWS:SourceArn": { "Fn::Sub": "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}" }
+                }
+              }
+            },
+            {
+              "Sid": "DenyInsecureTransport",
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                { "Fn::Sub": "arn:aws:s3:::${WebsiteBucket}" },
+                { "Fn::Sub": "arn:aws:s3:::${WebsiteBucket}/*" }
+              ],
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+
+    "ApiGatewayCloudWatchRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": { "Service": "apigateway.amazonaws.com" },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+        ]
+      }
+    },
+
+    "ApiGatewayAccount": {
+      "Type": "AWS::ApiGateway::Account",
+      "Properties": {
+        "CloudWatchRoleArn": { "Fn::GetAtt": ["ApiGatewayCloudWatchRole", "Arn"] }
+      }
+    },
+
+    "CloudFrontOAC": {
+      "Type": "AWS::CloudFront::OriginAccessControl",
+      "Properties": {
+        "OriginAccessControlConfig": {
+          "Name": { "Fn::Sub": "mp-buyer-oac-${AWS::StackName}" },
+          "OriginAccessControlOriginType": "s3",
+          "SigningBehavior": "always",
+          "SigningProtocol": "sigv4"
+        }
+      }
+    },
+
+    "CloudFrontDistribution": {
+      "Type": "AWS::CloudFront::Distribution",
+      "Properties": {
+        "DistributionConfig": {
+          "Enabled": true,
+          "DefaultRootObject": "index.html",
+          "Comment": "MP-Buyer Web Frontend",
+          "ViewerCertificate": {
+            "CloudFrontDefaultCertificate": true,
+            "MinimumProtocolVersion": "TLSv1.2_2021"
+          },
+          "Logging": {
+            "Bucket": { "Fn::GetAtt": ["LoggingBucket", "DomainName"] },
+            "IncludeCookies": false,
+            "Prefix": "cloudfront-logs/"
+          },
+          "Origins": [
+            {
+              "Id": "S3Origin",
+              "DomainName": { "Fn::GetAtt": ["WebsiteBucket", "RegionalDomainName"] },
+              "OriginAccessControlId": { "Ref": "CloudFrontOAC" },
+              "S3OriginConfig": {
+                "OriginAccessIdentity": ""
+              }
+            },
+            {
+              "Id": "ApiOrigin",
+              "DomainName": { "Fn::Sub": "${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com" },
+              "OriginPath": "/prod",
+              "CustomOriginConfig": {
+                "HTTPSPort": 443,
+                "OriginProtocolPolicy": "https-only"
+              }
+            }
+          ],
+          "DefaultCacheBehavior": {
+            "TargetOriginId": "S3Origin",
+            "ViewerProtocolPolicy": "redirect-to-https",
+            "AllowedMethods": ["GET", "HEAD"],
+            "CachedMethods": ["GET", "HEAD"],
+            "ForwardedValues": {
+              "QueryString": false
+            }
+          },
+          "CacheBehaviors": [
+            {
+              "PathPattern": "/api/*",
+              "TargetOriginId": "ApiOrigin",
+              "ViewerProtocolPolicy": "https-only",
+              "AllowedMethods": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
+              "CachedMethods": ["GET", "HEAD"],
+              "ForwardedValues": {
+                "QueryString": true,
+                "Headers": ["Authorization", "Content-Type"]
+              },
+              "DefaultTTL": 0,
+              "MinTTL": 0,
+              "MaxTTL": 0
+            }
+          ],
+          "CustomErrorResponses": [
+            {
+              "ErrorCode": 403,
+              "ResponseCode": 200,
+              "ResponsePagePath": "/index.html"
+            },
+            {
+              "ErrorCode": 404,
+              "ResponseCode": 200,
+              "ResponsePagePath": "/index.html"
+            }
+          ]
+        }
+      }
+    }
+  },
+
+  "Outputs": {
+    "ApiGatewayUrl": {
+      "Description": "API Gateway endpoint URL",
+      "Value": { "Fn::Sub": "https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod" }
+    },
+    "CloudFrontUrl": {
+      "Description": "CloudFront distribution URL (main website)",
+      "Value": { "Fn::Sub": "https://${CloudFrontDistribution.DomainName}" }
+    },
+    "WebsiteBucketName": {
+      "Description": "S3 bucket for static website files",
+      "Value": { "Ref": "WebsiteBucket" }
+    },
+    "LambdaFunctionName": {
+      "Description": "Lambda function name",
+      "Value": { "Ref": "AgreementsFunction" }
+    },
+    "LambdaFunctionArn": {
+      "Description": "Lambda function ARN",
+      "Value": { "Fn::GetAtt": ["AgreementsFunction", "Arn"] }
+    },
+    "ReportsFunctionName": {
+      "Description": "Reports Lambda function name",
+      "Value": { "Ref": "ReportsFunction" }
+    },
+    "SyncFunctionName": {
+      "Description": "Sync Lambda function name",
+      "Value": { "Ref": "SyncFunction" }
+    },
+    "DynamoDBTableName": {
+      "Description": "DynamoDB table for cached agreements",
+      "Value": { "Ref": "AgreementsTable" }
+    },
+    "UserPoolId": {
+      "Description": "Cognito User Pool ID",
+      "Value": { "Ref": "UserPool" }
+    },
+    "UserPoolClientId": {
+      "Description": "Cognito User Pool Client ID (use in frontend login)",
+      "Value": { "Ref": "UserPoolClient" }
+    },
+    "CognitoRegion": {
+      "Description": "Cognito region for frontend config",
+      "Value": { "Ref": "AWS::Region" }
+    }
+  }
+}

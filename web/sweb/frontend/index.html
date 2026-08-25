@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MP-Buyer | AWS Marketplace Agreements</title>
+<script src="js/amazon-cognito-identity.min.js"></script>
+<script src="config.js"></script>
+<style>
+:root{--squid-ink:#232f3e;--anchor:#1b2631;--smile:#ff9900;--smile-hover:#ec7211;--cosmos:#0f1b2a;--bg:#f2f3f3;--card:#fff;--text:#16191f;--muted:#5f6b7a;--border:#d1d5db;--success:#037f0c;--danger:#d91515;--info:#0972d3;--warning:#8d6605;--radius:8px;--shadow:0 1px 2px rgba(0,0,0,.05)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Amazon Ember','Helvetica Neue',Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5}
+.topnav{background:var(--cosmos);padding:0 24px;height:48px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #3b4a5a}
+.topnav .brand{color:#fff;font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
+.topnav .brand svg{color:var(--smile)}
+.topnav .meta{color:#8d9baa;font-size:12px;display:flex;align-items:center;gap:8px}
+.topnav .dot{width:6px;height:6px;border-radius:50%;background:var(--success)}
+.subnav{background:var(--squid-ink);padding:8px 24px;display:flex;gap:24px;border-bottom:2px solid var(--smile)}
+.subnav a{color:#d5dbdb;text-decoration:none;font-size:13px;padding:6px 0;border-bottom:2px solid transparent;transition:.2s}
+.subnav a:hover,.subnav a.active{color:#fff;border-bottom-color:var(--smile)}
+.container{max-width:1440px;margin:0 auto;padding:24px}
+.page-header{margin-bottom:20px}
+.page-header h1{font-size:22px;font-weight:700;color:var(--squid-ink)}
+.page-header p{color:var(--muted);font-size:13px;margin-top:4px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px}
+.stat{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px;box-shadow:var(--shadow)}
+.stat .num{font-size:28px;font-weight:700;color:var(--squid-ink)}
+.stat .lbl{font-size:12px;color:var(--muted);margin-top:2px}
+.stat.highlight{border-left:3px solid var(--smile)}
+.panel{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:20px}
+.panel-head{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.panel-head h2{font-size:15px;font-weight:600}
+.panel-body{padding:16px 20px}
+.filters{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.filters select,.filters input{padding:7px 12px;border:1px solid var(--border);border-radius:4px;font-size:13px;background:#fff;color:var(--text)}
+.filters select:focus,.filters input:focus{outline:none;border-color:var(--info);box-shadow:0 0 0 2px rgba(9,114,211,.15)}
+.btn{padding:7px 16px;border:none;border-radius:4px;font-size:13px;font-weight:600;cursor:pointer;transition:.15s}
+.btn-primary{background:var(--smile);color:#fff}
+.btn-primary:hover{background:var(--smile-hover)}
+.btn-ghost{background:transparent;color:var(--info);border:1px solid var(--border)}
+.btn-ghost:hover{background:#f7f7f7}
+table{width:100%;border-collapse:collapse}
+th{background:#fafafa;padding:10px 14px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);border-bottom:1px solid var(--border)}
+td{padding:12px 14px;border-bottom:1px solid #f0f0f0;font-size:13px}
+tr:hover td{background:#fafbfc}
+.id-link{font-family:'SF Mono',Monaco,'Courier New',monospace;font-size:12px;color:var(--info);cursor:pointer;text-decoration:none}
+.id-link:hover{text-decoration:underline}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+.badge-active{background:#e9f7e9;color:var(--success)}
+.badge-terminated{background:#fce9e9;color:var(--danger)}
+.badge-expired{background:#f0f0f0;color:#687078}
+.badge-cancelled{background:#fff4e6;color:#b35900}
+.badge-renewed{background:#e6f2ff;color:#0052a3}
+.badge-replaced{background:#f3e8ff;color:#6b21a8}
+.badge-archived{background:#eceff1;color:#546e7a}
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(15,27,42,.6);z-index:1000;justify-content:center;align-items:flex-start;padding:32px;overflow-y:auto}
+.modal-bg.open{display:flex}
+.modal{background:var(--card);border-radius:var(--radius);width:100%;max-width:860px;box-shadow:0 12px 40px rgba(0,0,0,.25);animation:fadeUp .2s ease}
+@keyframes fadeUp{from{transform:translateY(12px);opacity:0}to{transform:translateY(0);opacity:1}}
+.modal-head{padding:16px 24px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.modal-head h2{font-size:16px;font-weight:700}
+.modal-close{background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted);width:32px;height:32px;border-radius:4px;display:flex;align-items:center;justify-content:center}
+.modal-close:hover{background:var(--bg)}
+.modal-content{padding:24px}
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.detail-box{background:var(--bg);border-radius:6px;padding:12px 14px}
+.detail-box .key{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);margin-bottom:3px}
+.detail-box .val{font-size:13px;font-weight:500;word-break:break-all}
+.terms-wrap{margin-top:20px}
+.terms-wrap h3{font-size:14px;font-weight:600;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+.term{background:var(--bg);border-radius:6px;padding:12px 14px;margin-bottom:8px;border-left:3px solid var(--smile)}
+.term .ttype{font-weight:600;font-size:12px;margin-bottom:4px;color:var(--squid-ink)}
+.term pre{font-size:11px;white-space:pre-wrap;color:var(--muted);max-height:180px;overflow-y:auto}
+.loading{text-align:center;padding:48px;color:var(--muted)}
+.spinner{display:inline-block;width:24px;height:24px;border:3px solid var(--border);border-top-color:var(--smile);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.empty{text-align:center;padding:60px 20px;color:var(--muted)}
+.empty p{margin-top:8px}
+.toast{position:fixed;bottom:20px;right:20px;background:var(--squid-ink);color:#fff;padding:10px 18px;border-radius:6px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.3);transform:translateY(80px);opacity:0;transition:.3s;z-index:2000}
+.toast.show{transform:translateY(0);opacity:1}
+@media(max-width:768px){.container{padding:12px}.stats{grid-template-columns:1fr 1fr}.filters{flex-direction:column}.detail-grid{grid-template-columns:1fr}.modal-bg{padding:12px}}
+</style>
+</head>
+<body>
+<!-- Login Screen -->
+<div id="loginScreen" style="display:flex;position:fixed;inset:0;background:var(--cosmos);z-index:9999;align-items:center;justify-content:center">
+<div style="background:var(--card);border-radius:8px;padding:40px;width:360px;box-shadow:0 12px 40px rgba(0,0,0,.4)">
+<div style="text-align:center;margin-bottom:24px">
+<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#ff9900" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M4 10h16"/><path d="M10 4v16"/></svg>
+<h2 style="font-size:18px;margin-top:8px;color:var(--squid-ink)">MP-Buyer</h2>
+<p style="font-size:12px;color:var(--muted)">Sign in to manage marketplace agreements</p>
+</div>
+<div id="loginError" style="display:none;background:#fef0ef;border-left:3px solid var(--danger);padding:8px 12px;margin-bottom:16px;font-size:12px;color:var(--danger);border-radius:4px"></div>
+<div id="loginForm">
+<input id="loginEmail" type="email" placeholder="Email" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:4px;margin-bottom:12px;font-size:14px">
+<input id="loginPassword" type="password" placeholder="Password" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:4px;margin-bottom:16px;font-size:14px">
+<button onclick="doLogin()" class="btn btn-primary" style="width:100%;padding:12px;font-size:14px">Sign In</button>
+</div>
+<div id="newPasswordForm" style="display:none">
+<p style="font-size:12px;color:var(--muted);margin-bottom:12px">You must set a new password:</p>
+<input id="newPassword" type="password" placeholder="New password (8+ chars, upper, lower, number)" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:4px;margin-bottom:16px;font-size:14px">
+<button onclick="doNewPassword()" class="btn btn-primary" style="width:100%;padding:12px;font-size:14px">Set Password & Sign In</button>
+</div>
+</div>
+</div>
+<div class="topnav">
+<div class="brand">
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M4 10h16"/><path d="M10 4v16"/></svg>
+<span>MP-Buyer</span>
+</div>
+<div class="meta"><div class="dot" id="dot"></div><span id="connStatus">Connecting...</span><button onclick="logout()" style="margin-left:12px;background:none;border:1px solid #5f6b7a;color:#8d9baa;padding:3px 10px;border-radius:3px;font-size:11px;cursor:pointer">Sign Out</button></div>
+</div>
+<div class="subnav">
+<a href="#" class="active" id="navAgreements" onclick="showTab('agreements')">Agreements</a>
+<a href="#" id="navProducts" onclick="showTab('products')">Discover Products</a>
+<a href="#" id="navReports" onclick="showTab('reports')">Reports</a>
+<a href="#" onclick="searchAgreements();return false">Refresh</a>
+</div>
+<div class="container">
+<div class="page-header">
+<h1>AWS Marketplace Agreements</h1>
+<p>Search, view, and manage your AWS Marketplace agreements and subscriptions</p>
+</div>
+<div class="stats">
+<div class="stat highlight"><div class="num" id="sTotal">-</div><div class="lbl">Total</div></div>
+<div class="stat"><div class="num" id="sActive">-</div><div class="lbl">Active</div></div>
+<div class="stat"><div class="num" id="sExpired">-</div><div class="lbl">Expired</div></div>
+<div class="stat"><div class="num" id="sTerminated">-</div><div class="lbl">Terminated</div></div>
+<div class="stat"><div class="num" id="sOther">-</div><div class="lbl">Other</div></div>
+</div>
+<div class="panel">
+<div class="panel-head"><h2>Filters</h2><span id="rCount" style="font-size:12px;color:var(--muted)"></span></div>
+<div class="panel-body">
+<div class="filters">
+<select id="fParty"><option value="Acceptor">Buyer (Acceptor)</option><option value="Proposer">Seller (Proposer)</option></select>
+<select id="fStatus"><option value="">All Statuses</option><option value="ACTIVE">Active</option><option value="EXPIRED">Expired</option><option value="TERMINATED">Terminated</option><option value="CANCELLED">Cancelled</option><option value="RENEWED">Renewed</option><option value="REPLACED">Replaced</option><option value="ARCHIVED">Archived</option></select>
+<input id="fAccount" placeholder="Account ID (optional)" style="width:160px">
+<input id="fOffer" placeholder="Offer ID (optional)" style="width:160px">
+<button class="btn btn-primary" onclick="searchAgreements()">Search</button>
+<button class="btn btn-ghost" onclick="resetFilters()">Clear</button>
+</div>
+</div>
+</div>
+<div class="panel">
+<div class="panel-head"><h2>Results</h2></div>
+<div id="tbl"><div class="loading"><div class="spinner"></div><p style="margin-top:10px">Loading...</p></div></div>
+</div>
+</div>
+
+<!-- Products Discovery Section -->
+<div id="productsSection" style="display:none">
+<div class="panel">
+<div class="panel-head"><h2>Search Marketplace Products</h2></div>
+<div class="panel-body">
+<div class="filters">
+<input id="pSearch" placeholder="Search products (e.g., monitoring, database, security)" style="width:320px">
+<button class="btn btn-primary" onclick="searchProducts()">Search Marketplace</button>
+</div>
+</div>
+</div>
+<div class="panel">
+<div class="panel-head"><h2>Products</h2><span id="pCount" style="font-size:12px;color:var(--muted)"></span></div>
+<div id="pTbl"><div class="empty"><p>Search for products to discover available marketplace offerings</p></div></div>
+</div>
+</div>
+
+<!-- Reports Section -->
+<div id="reportsSection" style="display:none">
+<div class="panel">
+<div class="panel-head"><h2>Agreement Reports</h2></div>
+<div class="panel-body">
+<div class="filters">
+<select id="rType">
+<option value="portfolio">Portfolio (Active Subscriptions)</option>
+<option value="spend_summary">Spend Summary</option>
+<option value="expiring_soon">Expiring Soon</option>
+<option value="lifecycle">Lifecycle & Trends</option>
+<option value="compliance">Compliance Audit</option>
+<option value="all">All Reports</option>
+</select>
+<select id="rDays">
+<option value="30">Next 30 days</option>
+<option value="60">Next 60 days</option>
+<option value="90" selected>Next 90 days</option>
+<option value="180">Next 180 days</option>
+</select>
+<button class="btn btn-primary" onclick="launchReport()">Generate Report</button>
+<button class="btn btn-ghost" onclick="loadReportHistory()">Refresh History</button>
+</div>
+</div>
+</div>
+<div class="panel">
+<div class="panel-head"><h2>Report History</h2><span id="rHistCount" style="font-size:12px;color:var(--muted)"></span></div>
+<div id="rHistory"><div class="loading"><div class="spinner"></div><p style="margin-top:10px">Loading reports...</p></div></div>
+</div>
+</div>
+<div class="modal-bg" id="mBg" onclick="closeModal(event)">
+<div class="modal" onclick="event.stopPropagation()">
+<div class="modal-head"><h2 id="mTitle">Agreement Details</h2><button class="modal-close" onclick="closeModal()">&times;</button></div>
+<div class="modal-content" id="mBody"><div class="loading"><div class="spinner"></div></div></div>
+</div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const API_BASE=window.location.origin;
+let agreements=[];
+let authToken=null;
+let cognitoUser=null;
+
+// --- Auth ---
+const poolData={
+UserPoolId: window.APP_CONFIG?.userPoolId || '',
+ClientId: window.APP_CONFIG?.userPoolClientId || ''
+};
+const userPool = new AmazonCognitoIdentity.CognitoUserPool(poolData);
+
+function getAuthHeaders(){
+return authToken ? {'Content-Type':'application/json','Authorization':authToken} : {'Content-Type':'application/json'};
+}
+
+function doLogin(){
+const email=document.getElementById('loginEmail').value.trim();
+const password=document.getElementById('loginPassword').value;
+if(!email||!password){showLoginError('Enter email and password');return}
+
+const authDetails=new AmazonCognitoIdentity.AuthenticationDetails({Username:email,Password:password});
+cognitoUser=new AmazonCognitoIdentity.CognitoUser({Username:email,Pool:userPool});
+
+cognitoUser.authenticateUser(authDetails,{
+onSuccess:function(result){
+authToken=result.getIdToken().getJwtToken();
+document.getElementById('loginScreen').style.display='none';
+health();
+searchAgreements();
+},
+onFailure:function(err){
+showLoginError(err.message||'Authentication failed');
+},
+newPasswordRequired:function(userAttributes){
+document.getElementById('loginForm').style.display='none';
+document.getElementById('newPasswordForm').style.display='block';
+}
+});
+}
+
+function doNewPassword(){
+const newPw=document.getElementById('newPassword').value;
+if(!newPw||newPw.length<8){showLoginError('Password must be 8+ characters');return}
+cognitoUser.completeNewPasswordChallenge(newPw,{},{
+onSuccess:function(result){
+authToken=result.getIdToken().getJwtToken();
+document.getElementById('loginScreen').style.display='none';
+health();
+searchAgreements();
+},
+onFailure:function(err){showLoginError(err.message||'Failed to set password')}
+});
+}
+
+function showLoginError(msg){
+const el=document.getElementById('loginError');
+el.textContent=msg;
+el.style.display='block';
+}
+
+function logout(){
+if(cognitoUser)cognitoUser.signOut();
+authToken=null;
+document.getElementById('loginScreen').style.display='flex';
+document.getElementById('loginForm').style.display='block';
+document.getElementById('newPasswordForm').style.display='none';
+document.getElementById('loginError').style.display='none';
+document.getElementById('loginPassword').value='';
+}
+
+// Check for existing session
+const currentUser=userPool.getCurrentUser();
+if(currentUser){
+currentUser.getSession(function(err,session){
+if(!err&&session&&session.isValid()){
+authToken=session.getIdToken().getJwtToken();
+cognitoUser=currentUser;
+document.getElementById('loginScreen').style.display='none';
+health();
+searchAgreements();
+}
+});
+}
+
+// Enter key on login form
+document.getElementById('loginEmail')?.addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('loginPassword').focus()});
+document.getElementById('loginPassword')?.addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
+document.getElementById('newPassword')?.addEventListener('keydown',e=>{if(e.key==='Enter')doNewPassword()});
+
+async function searchAgreements(){
+const party=document.getElementById('fParty').value;
+const status=document.getElementById('fStatus').value;
+const account=document.getElementById('fAccount').value.trim();
+const offer=document.getElementById('fOffer').value.trim();
+const filters=[{name:'AgreementType',values:['PurchaseAgreement']},{name:'PartyType',values:[party]}];
+if(status)filters.push({name:'Status',values:[status]});
+if(account)filters.push({name:'AcceptorAccountId',values:[account]});
+if(offer)filters.push({name:'OfferId',values:[offer]});
+document.getElementById('tbl').innerHTML='<div class="loading"><div class="spinner"></div><p style="margin-top:10px">Searching...</p></div>';
+try{
+const r=await fetch(API_BASE+'/api/agreements/search',{method:'POST',headers:getAuthHeaders(),body:JSON.stringify({filters,max_results:50})});
+const d=await r.json();
+if(d.error){toast('Error: '+d.error);showEmpty(d.error);return}
+agreements=d.agreementViewSummaries||[];
+render(agreements);
+stats(agreements);
+document.getElementById('rCount').textContent=d.count+' result(s)';
+}catch(e){toast('Network error');showEmpty('Cannot reach API')}
+}
+
+async function viewAgreement(id){
+document.getElementById('mBg').classList.add('open');
+document.getElementById('mTitle').textContent=id;
+document.getElementById('mBody').innerHTML='<div class="loading"><div class="spinner"></div></div>';
+try{
+const[dr,tr]=await Promise.all([fetch(API_BASE+'/api/agreements/'+id,{headers:getAuthHeaders()}),fetch(API_BASE+'/api/agreements/'+id+'/terms',{headers:getAuthHeaders()})]);
+const det=await dr.json(),terms=await tr.json();
+if(det.error){document.getElementById('mBody').innerHTML='<p style="color:var(--danger)">'+det.error+'</p>';return}
+renderModal(det,terms);
+}catch(e){document.getElementById('mBody').innerHTML='<p style="color:var(--danger)">'+e.message+'</p>'}
+}
+
+function render(list){
+if(!list.length){showEmpty('No agreements found');return}
+let h='<table><thead><tr><th>Agreement ID</th><th>Product</th><th>Status</th><th>Type</th><th>Acceptor</th><th>Proposer</th><th>Start</th><th>End</th><th></th></tr></thead><tbody>';
+for(const a of list){
+const resources=a.proposalSummary?.resources||[];
+const productName=resources.map(r=>r.name||r.type||'').filter(Boolean).join(', ')||'-';
+h+=`<tr><td><a class="id-link" onclick="viewAgreement('${a.agreementId}')">${a.agreementId}</a></td><td><strong>${productName}</strong></td><td>${badge(a.status)}</td><td>${a.agreementType||'-'}</td><td>${a.acceptor?.accountId||'-'}</td><td>${a.proposer?.accountId||'-'}</td><td>${fmtDate(a.startTime)}</td><td>${a.endTime?fmtDate(a.endTime):'<span style="color:var(--muted)">Pay-as-you-go</span>'}</td><td><button class="btn btn-ghost" onclick="viewAgreement('${a.agreementId}')" style="padding:4px 10px;font-size:11px">View</button></td></tr>`;
+}
+h+='</tbody></table>';
+document.getElementById('tbl').innerHTML=h;
+}
+
+function renderModal(d,t){
+let h=`<div class="detail-grid">
+<div class="detail-box"><div class="key">Agreement ID</div><div class="val">${d.agreementId||'-'}</div></div>
+<div class="detail-box"><div class="key">Status</div><div class="val">${badge(d.status)}</div></div>
+<div class="detail-box"><div class="key">Type</div><div class="val">${d.agreementType||'-'}</div></div>
+<div class="detail-box"><div class="key">Acceptor</div><div class="val">${d.acceptor?.accountId||'-'}</div></div>
+<div class="detail-box"><div class="key">Proposer</div><div class="val">${d.proposer?.accountId||'-'}</div></div>
+<div class="detail-box"><div class="key">Accepted</div><div class="val">${fmtDT(d.acceptanceTime)}</div></div>
+<div class="detail-box"><div class="key">Start</div><div class="val">${fmtDT(d.startTime)}</div></div>
+<div class="detail-box"><div class="key">End</div><div class="val">${d.endTime?fmtDT(d.endTime):'Pay-as-you-go'}</div></div>`;
+if(d.estimatedCharges)h+=`<div class="detail-box"><div class="key">Estimated Charges</div><div class="val">${d.estimatedCharges.currencyCode||''} ${d.estimatedCharges.agreementValue||'-'}</div></div>`;
+if(d.proposalSummary){
+const resources=d.proposalSummary.resources||[];
+const productName=resources.map(r=>r.name||'').filter(Boolean).join(', ');
+const resDisplay=resources.map(r=>(r.name?r.name+' — ':'')+r.type+' ('+r.id+')').join('<br>');
+if(productName)h+=`<div class="detail-box" style="grid-column:1/-1;border-left:3px solid var(--smile)"><div class="key">Product Name</div><div class="val" style="font-size:15px;font-weight:700">${productName}</div></div>`;
+h+=`<div class="detail-box"><div class="key">Offer ID</div><div class="val">${d.proposalSummary.offerId||'-'}</div></div>`;
+if(resDisplay)h+=`<div class="detail-box"><div class="key">Resources</div><div class="val">${resDisplay}</div></div>`;
+}
+h+='</div>';
+if(t&&t.acceptedTerms&&t.acceptedTerms.length){
+h+='<div class="terms-wrap"><h3>Terms ('+t.count+')</h3>';
+for(const term of t.acceptedTerms){for(const k of Object.keys(term)){const td=term[k];const tt=td?.type||td?.Type||k;h+=`<div class="term"><div class="ttype">${tt}</div><pre>${JSON.stringify(td,null,2)}</pre></div>`;}}
+h+='</div>';
+}
+document.getElementById('mBody').innerHTML=h;
+}
+
+function badge(s){const c={ACTIVE:'badge-active',TERMINATED:'badge-terminated',EXPIRED:'badge-expired',CANCELLED:'badge-cancelled',RENEWED:'badge-renewed',REPLACED:'badge-replaced',ARCHIVED:'badge-archived'}[s]||'badge-expired';return`<span class="badge ${c}">${s||'?'}</span>`}
+function fmtDate(iso){if(!iso)return'-';return new Date(iso).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'})}
+function fmtDT(iso){if(!iso)return'-';return new Date(iso).toLocaleString('en-US',{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+function stats(list){const t=list.length,a=list.filter(x=>x.status==='ACTIVE').length,e=list.filter(x=>x.status==='EXPIRED').length,d=list.filter(x=>x.status==='TERMINATED').length;document.getElementById('sTotal').textContent=t;document.getElementById('sActive').textContent=a;document.getElementById('sExpired').textContent=e;document.getElementById('sTerminated').textContent=d;document.getElementById('sOther').textContent=t-a-e-d}
+function showEmpty(m){document.getElementById('tbl').innerHTML=`<div class="empty"><p>${m}</p></div>`}
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),4000)}
+function closeModal(e){if(!e||e.target===document.getElementById('mBg'))document.getElementById('mBg').classList.remove('open')}
+function resetFilters(){document.getElementById('fParty').value='Acceptor';document.getElementById('fStatus').value='';document.getElementById('fAccount').value='';document.getElementById('fOffer').value='';searchAgreements()}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
+
+async function health(){try{const r=await fetch(API_BASE+'/api/health');const d=await r.json();if(d.status==='healthy'){document.getElementById('dot').style.background='var(--success)';document.getElementById('connStatus').textContent='Connected ('+d.account+')';}else{document.getElementById('dot').style.background='var(--danger)';document.getElementById('connStatus').textContent='Error';}}catch{document.getElementById('dot').style.background='var(--danger)';document.getElementById('connStatus').textContent='Offline';}}
+
+health();
+searchAgreements();
+
+// --- Tab Navigation ---
+function showTab(tab){
+document.getElementById('navAgreements').classList.toggle('active',tab==='agreements');
+document.getElementById('navProducts').classList.toggle('active',tab==='products');
+document.getElementById('navReports').classList.toggle('active',tab==='reports');
+const pSection=document.getElementById('productsSection');
+const rSection=document.getElementById('reportsSection');
+if(tab==='products'){
+document.querySelector('.stats').style.display='none';
+document.querySelectorAll('.container > .panel').forEach(p=>{if(!pSection.contains(p)&&!rSection.contains(p))p.style.display='none'});
+pSection.style.display='block';
+rSection.style.display='none';
+}else if(tab==='reports'){
+document.querySelector('.stats').style.display='none';
+document.querySelectorAll('.container > .panel').forEach(p=>{if(!pSection.contains(p)&&!rSection.contains(p))p.style.display='none'});
+pSection.style.display='none';
+rSection.style.display='block';
+loadReportHistory();
+}else{
+document.querySelector('.stats').style.display='';
+document.querySelectorAll('.container > .panel').forEach(p=>{if(!pSection.contains(p)&&!rSection.contains(p))p.style.display=''});
+pSection.style.display='none';
+rSection.style.display='none';
+}
+}
+
+// --- Product Search ---
+async function searchProducts(){
+const q=document.getElementById('pSearch').value.trim();
+if(!q){toast('Enter a search term');return}
+document.getElementById('pTbl').innerHTML='<div class="loading"><div class="spinner"></div><p style="margin-top:10px">Searching marketplace...</p></div>';
+try{
+const r=await fetch(API_BASE+'/api/products/search',{method:'POST',headers:getAuthHeaders(),body:JSON.stringify({search_text:q,max_results:20})});
+const d=await r.json();
+if(d.error){toast('Error: '+d.error);return}
+renderProducts(d.listings||[]);
+document.getElementById('pCount').textContent=d.totalResults+' total result(s)';
+}catch(e){toast('Network error');document.getElementById('pTbl').innerHTML='<div class="empty"><p>Cannot reach API</p></div>'}
+}
+
+function renderProducts(list){
+if(!list.length){document.getElementById('pTbl').innerHTML='<div class="empty"><p>No products found</p></div>';return}
+let h='<table><thead><tr><th>Product</th><th>Publisher</th><th>Categories</th><th>Pricing</th><th>Fulfillment</th><th></th></tr></thead><tbody>';
+for(const p of list){
+const name=p.product?.productName||p.listingName||'-';
+const pid=p.product?.productId||'';
+h+=`<tr>
+<td><strong>${name}</strong><br><span style="font-size:11px;color:var(--muted)">${(p.shortDescription||'').substring(0,80)}${p.shortDescription?.length>80?'...':''}</span></td>
+<td>${p.publisher||p.product?.manufacturer||'-'}</td>
+<td><span style="font-size:11px">${(p.categories||[]).join(', ')||'-'}</span></td>
+<td><span style="font-size:11px">${(p.pricingModels||[]).join(', ')||'-'}</span></td>
+<td><span style="font-size:11px">${(p.fulfillmentOptions||[]).join(', ')||'-'}</span></td>
+<td>${pid?`<button class="btn btn-primary" onclick="viewProductOptions('${pid}','${name.replace(/'/g,"\\'")}')" style="padding:4px 12px;font-size:11px">Subscribe</button>`:''}</td>
+</tr>`;
+}
+h+='</tbody></table>';
+document.getElementById('pTbl').innerHTML=h;
+}
+
+// --- Purchase Options / Subscribe ---
+async function viewProductOptions(productId,productName){
+document.getElementById('mBg').classList.add('open');
+document.getElementById('mTitle').textContent='Subscribe: '+productName;
+document.getElementById('mBody').innerHTML='<div class="loading"><div class="spinner"></div><p style="margin-top:10px">Loading purchase options...</p></div>';
+try{
+const r=await fetch(API_BASE+'/api/products/'+productId+'/options',{headers:getAuthHeaders()});
+const d=await r.json();
+if(d.error){document.getElementById('mBody').innerHTML='<p style="color:var(--danger)">'+d.error+'</p>';return}
+renderPurchaseOptions(d.purchaseOptions||[],productName,productId,d.debug_sample||'');
+}catch(e){document.getElementById('mBody').innerHTML='<p style="color:var(--danger)">'+e.message+'</p>'}
+}
+
+function renderPurchaseOptions(options,productName,productId){
+if(!options.length){
+document.getElementById('mBody').innerHTML='<div class="empty"><p>No purchase options available for this product</p>'+(arguments[3]?'<pre style="font-size:11px;margin-top:12px;text-align:left">'+arguments[3]+'</pre>':'')+'</div>';
+return;
+}
+let h=`<div class="detail-box" style="border-left:3px solid var(--smile);margin-bottom:16px"><div class="key">Product</div><div class="val" style="font-size:15px;font-weight:700">${productName}</div></div>`;
+h+='<h3 style="font-size:14px;margin-bottom:12px">Available Purchase Options</h3>';
+for(const opt of options){
+const status=opt.availabilityStatus||'';
+const statusBadge=status==='AVAILABLE'?'<span class="badge badge-active">Available</span>':'<span class="badge badge-expired">'+(status||'Unknown')+'</span>';
+const proposalId=opt.agreementProposalIdentifier||'';
+h+=`<div class="term" style="cursor:pointer" onclick="initiateSubscription('${proposalId}','${(opt.offerName||opt.offerId||'').replace(/'/g,"\\'")}')">
+<div class="ttype">${opt.offerName||opt.offerId||'Offer'} ${statusBadge}</div>
+<div style="font-size:12px;color:var(--muted);margin-top:4px">
+<strong>Type:</strong> ${opt.purchaseOptionType||'-'} &nbsp;|&nbsp;
+<strong>Seller:</strong> ${opt.seller||'-'} &nbsp;|&nbsp;
+<strong>Offer ID:</strong> ${opt.offerId||'-'}
+${proposalId?'&nbsp;|&nbsp; <strong>Proposal:</strong> '+proposalId:''}
+</div>
+${opt.pricingSummary?'<pre style="margin-top:8px">'+JSON.stringify(opt.pricingSummary,null,2)+'</pre>':''}
+${opt.rawKeys?'<div style="font-size:10px;color:#aaa;margin-top:4px">Keys: '+opt.rawKeys.join(', ')+'</div>':''}
+<div style="margin-top:8px"><button class="btn btn-primary" style="padding:4px 14px;font-size:11px">${proposalId?'Select & Subscribe →':'View Details'}</button></div>
+</div>`;
+}
+document.getElementById('mBody').innerHTML=h;
+}
+
+async function initiateSubscription(proposalId,offerName){
+if(!proposalId){toast('No agreement proposal identifier available for this offer');return}
+if(!confirm('Create a subscription quote for: '+offerName+'?\\n\\nThis will generate an estimate. You will need to confirm before being charged.')){return}
+document.getElementById('mBody').innerHTML='<div class="loading"><div class="spinner"></div><p style="margin-top:10px">Creating agreement request...</p></div>';
+try{
+const r=await fetch(API_BASE+'/api/subscribe',{method:'POST',headers:getAuthHeaders(),body:JSON.stringify({offerId:proposalId,intent:'NEW'})});
+const d=await r.json();
+if(d.error){document.getElementById('mBody').innerHTML=`<div class="callout" style="border-left:3px solid var(--danger);background:#fef0ef;padding:16px"><strong>Error:</strong> ${d.error}</div>`;return}
+renderQuote(d,offerName);
+}catch(e){document.getElementById('mBody').innerHTML='<p style="color:var(--danger)">'+e.message+'</p>'}
+}
+
+function renderQuote(data,offerName){
+const cs=data.chargeSummary||{};
+let h=`<div class="detail-box" style="border-left:3px solid var(--success);margin-bottom:16px">
+<div class="key">Agreement Request Created</div>
+<div class="val" style="font-size:14px"><strong>ID:</strong> ${data.agreementRequestId}</div>
+</div>`;
+if(cs.newAgreementValue){
+h+=`<div class="detail-grid" style="margin-bottom:16px">
+<div class="detail-box"><div class="key">Total Value</div><div class="val" style="font-size:18px;font-weight:700">${cs.currencyCode||'USD'} ${cs.newAgreementValue}</div></div>
+<div class="detail-box"><div class="key">Offer</div><div class="val">${offerName}</div></div>
+</div>`;
+}
+if(cs.expectedCharges?.length){
+h+='<h3 style="font-size:13px;margin:12px 0 8px">Expected Charges</h3>';
+for(const ch of cs.expectedCharges){
+h+=`<div class="term"><div class="ttype">${ch.timing||'Charge'}</div><div style="font-size:13px">${cs.currencyCode||'USD'} ${ch.amount||'TBD'}</div></div>`;
+}
+}
+if(cs.itemizedCharges?.length){
+h+='<h3 style="font-size:13px;margin:12px 0 8px">Itemized Charges</h3><table><thead><tr><th>Dimension</th><th>Qty</th><th>Amount</th></tr></thead><tbody>';
+for(const ic of cs.itemizedCharges){
+h+=`<tr><td>${ic.dimensionKey}</td><td>${ic.newQuantity}</td><td>${ic.incrementalChargeAmount||'-'}</td></tr>`;
+}
+h+='</tbody></table>';
+}
+h+=`<div style="margin-top:20px;text-align:center">
+<button class="btn btn-primary" onclick="acceptSubscription('${data.agreementRequestId}')" style="padding:10px 24px;font-size:14px">✓ Accept & Subscribe</button>
+<button class="btn btn-ghost" onclick="closeModal()" style="margin-left:12px;padding:10px 24px;font-size:14px">Cancel</button>
+</div>`;
+document.getElementById('mBody').innerHTML=h;
+}
+
+async function acceptSubscription(requestId){
+if(!confirm('CONFIRM SUBSCRIPTION\\n\\nThis will finalize the agreement and you will be charged. Continue?')){return}
+document.getElementById('mBody').innerHTML='<div class="loading"><div class="spinner"></div><p style="margin-top:10px">Accepting agreement...</p></div>';
+try{
+const r=await fetch(API_BASE+'/api/subscribe/accept',{method:'POST',headers:getAuthHeaders(),body:JSON.stringify({agreementRequestId:requestId})});
+const d=await r.json();
+if(d.error){document.getElementById('mBody').innerHTML=`<div class="callout" style="border-left:3px solid var(--danger);background:#fef0ef;padding:16px"><strong>Error:</strong> ${d.error}</div>`;return}
+document.getElementById('mBody').innerHTML=`<div style="text-align:center;padding:40px">
+<div style="font-size:48px;margin-bottom:16px">✅</div>
+<h3 style="color:var(--success)">Subscription Accepted!</h3>
+<p style="margin-top:8px;color:var(--muted)">Agreement ID: <strong>${d.agreementId}</strong></p>
+<button class="btn btn-primary" onclick="closeModal();showTab('agreements');searchAgreements()" style="margin-top:20px">View My Agreements</button>
+</div>`;
+}catch(e){document.getElementById('mBody').innerHTML='<p style="color:var(--danger)">'+e.message+'</p>'}
+}
+
+// Enter key for product search
+document.getElementById('pSearch')?.addEventListener('keydown',e=>{if(e.key==='Enter')searchProducts()});
+
+// --- Reports ---
+async function launchReport(){
+const reportType=document.getElementById('rType').value;
+const days=document.getElementById('rDays').value;
+toast('Generating '+reportType+' report...');
+try{
+const r=await fetch(API_BASE+'/api/reports',{method:'POST',headers:getAuthHeaders(),body:JSON.stringify({report_type:reportType,days:parseInt(days)})});
+const d=await r.json();
+if(d.error){toast('Error: '+d.error);return}
+toast('Report generated: '+d.reportId);
+setTimeout(loadReportHistory,1000);
+}catch(e){toast('Error: '+e.message)}
+}
+
+async function loadReportHistory(){
+document.getElementById('rHistory').innerHTML='<div class="loading"><div class="spinner"></div></div>';
+try{
+const r=await fetch(API_BASE+'/api/reports',{headers:getAuthHeaders()});
+const d=await r.json();
+if(d.error){document.getElementById('rHistory').innerHTML='<div class="empty"><p>'+d.error+'</p></div>';return}
+renderReportHistory(d.reports||[]);
+document.getElementById('rHistCount').textContent=(d.count||0)+' report(s)';
+}catch(e){document.getElementById('rHistory').innerHTML='<div class="empty"><p>Error loading reports</p></div>'}
+}
+
+function renderReportHistory(reports){
+if(!reports.length){document.getElementById('rHistory').innerHTML='<div class="empty"><p>No reports generated yet. Click "Generate Report" to create one.</p></div>';return}
+let h='<table><thead><tr><th>Report ID</th><th>Type</th><th>Generated</th><th>Status</th><th>Agreements</th><th></th></tr></thead><tbody>';
+for(const r of reports){
+h+=`<tr style="cursor:pointer" onclick="viewReport('${r.reportId}')">
+<td><a class="id-link">${r.reportId}</a></td>
+<td><span class="badge badge-active">${r.reportType}</span></td>
+<td>${fmtDT(r.generatedAt)}</td>
+<td><span class="badge badge-active">${r.status||'COMPLETED'}</span></td>
+<td>${r.totalAgreements||'-'}</td>
+<td><button class="btn btn-ghost" style="padding:4px 10px;font-size:11px">View</button></td>
+</tr>`;
+}
+h+='</tbody></table>';
+document.getElementById('rHistory').innerHTML=h;
+}
+
+async function viewReport(reportId){
+document.getElementById('mBg').classList.add('open');
+document.getElementById('mTitle').textContent='Report: '+reportId;
+document.getElementById('mBody').innerHTML='<div class="loading"><div class="spinner"></div><p style="margin-top:10px">Loading report...</p></div>';
+try{
+const r=await fetch(API_BASE+'/api/reports?id='+encodeURIComponent(reportId),{headers:getAuthHeaders()});
+const d=await r.json();
+if(d.error){document.getElementById('mBody').innerHTML='<p style="color:var(--danger)">'+d.error+'</p>';return}
+renderReportModal(d);
+}catch(e){document.getElementById('mBody').innerHTML='<p style="color:var(--danger)">'+e.message+'</p>'}
+}
+
+function renderReportModal(data){
+let h='<div style="padding:4px">';
+h+=`<div style="display:flex;justify-content:space-between;margin-bottom:16px"><div><strong>${data.reportType||'Report'}</strong><br><span style="font-size:11px;color:var(--muted)">${data.generatedAt||''}</span></div></div>`;
+if(data.aiInsights)h+=`<div style="background:#f0f4ff;border-left:3px solid var(--info);padding:14px;border-radius:6px;margin-bottom:16px;white-space:pre-wrap;font-size:13px">${data.aiInsights}</div>`;
+if(data.totalAgreements!==undefined)h+=metricCard('Total',data.totalAgreements);
+if(data.totalActive!==undefined)h+=metricCard('Active',data.totalActive);
+if(data.totalEstimatedValue)h+=metricCard('Value','$'+data.totalEstimatedValue);
+if(data.totalExpiring!==undefined)h+=metricCard('Expiring',data.totalExpiring);
+if(data.churnRate!==undefined)h+=metricCard('Churn',data.churnRate+'%');
+if(data.uniqueVendors!==undefined)h+=metricCard('Vendors',data.uniqueVendors);
+if(data.byStatus||data.statusDistribution){const dist=data.statusDistribution||data.byStatus;h+='<h4 style="margin:16px 0 8px;font-size:13px">Status</h4><div style="display:flex;gap:8px;flex-wrap:wrap">';for(const[k,v]of Object.entries(dist)){h+=`<span class="badge badge-${k.toLowerCase()}">${k}: ${v}</span>`}h+='</div>'}
+if(data.agreements&&data.agreements.length){h+='<h4 style="margin:16px 0 8px;font-size:13px">Details ('+data.agreements.length+')</h4><div style="max-height:300px;overflow:auto"><table><thead><tr><th>Product</th><th>Status/Days</th><th>Info</th></tr></thead><tbody>';for(const a of data.agreements.slice(0,50)){h+=`<tr><td><strong>${a.productName||a.agreementId||'-'}</strong></td><td>${a.daysRemaining!==undefined?a.daysRemaining+' days':(a.status||'-')}</td><td>${a.proposer||a.productType||'-'}</td></tr>`}h+='</tbody></table></div>'}
+if(data.subscriptions){h+='<h4 style="margin:16px 0 8px;font-size:13px">Subscriptions ('+data.subscriptions.length+')</h4><div style="max-height:300px;overflow:auto"><table><thead><tr><th>Product</th><th>Type</th><th>End</th></tr></thead><tbody>';for(const s of data.subscriptions){h+=`<tr><td><strong>${s.productName}</strong></td><td>${s.productType||'-'}</td><td>${s.endTime?fmtDate(s.endTime):'Pay-as-you-go'}</td></tr>`}h+='</tbody></table></div>'}
+h+=`<details style="margin-top:16px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">Raw JSON</summary><pre style="font-size:11px;max-height:300px;overflow:auto;margin-top:8px">${JSON.stringify(data,null,2)}</pre></details>`;
+h+='</div>';
+document.getElementById('mBody').innerHTML=h;
+}
+
+function metricCard(label,value){return `<div style="display:inline-block;background:var(--bg);border-radius:6px;padding:10px 16px;margin:4px 8px 4px 0;border-left:3px solid var(--smile)"><div style="font-size:20px;font-weight:700">${value}</div><div style="font-size:11px;color:var(--muted)">${label}</div></div>`}
+</script>
+</body>
+</html>
